@@ -1,0 +1,50 @@
+# AI Test Platform - Backend Dependencies
+# Phase 1 MVP: 需求→用例 单链路
+
+# Web Framework
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+python-multipart>=0.0.6
+
+# Database
+sqlalchemy>=2.0.25
+asyncpg>=0.29.0
+psycopg2-binary>=2.9.9
+alembic>=1.13.0
+pgvector>=0.2.4
+
+# LLM
+openai>=1.12.0
+anthropic>=0.18.0
+dashscope>=1.16.0  # 通义千问
+
+# Vector / RAG
+qdrant-client>=1.7.0
+sentence-transformers>=2.3.0
+
+# Task Queue
+redis>=5.0.0
+celery>=5.3.0
+
+# Data Processing
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+pyyaml>=6.0
+python-dotenv>=1.0.0
+
+# Export
+openpyxl>=3.1.0
+xmind>=0.1.0  # or custom export
+
+# Utilities
+httpx>=0.26.0
+jinja2>=3.1.0
+python-jose[cryptography]>=3.3.0
+
+# Logging
+loguru>=0.7.0
+
+# Testing
+pytest>=7.4.0
+pytest-asyncio>=0.23.0
+pytest-cov>=4.1.0
