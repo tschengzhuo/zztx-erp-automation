@@ -1,0 +1,27 @@
+# AI Test Platform - CloudStudio (SQLite) 精简依赖
+# Web Framework
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+python-multipart>=0.0.6
+
+# Database - SQLite
+sqlalchemy>=2.0.25
+aiosqlite>=0.19.0
+
+# LLM
+openai>=1.12.0
+dashscope>=1.16.0
+
+# Data Processing
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+pyyaml>=6.0
+python-dotenv>=1.0.0
+
+# Export
+openpyxl>=3.1.0
+
+# Utilities
+httpx>=0.26.0
+jinja2>=3.1.0
+python-jose[cryptography]>=3.3.0

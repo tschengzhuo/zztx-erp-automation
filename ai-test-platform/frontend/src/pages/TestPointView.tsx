@@ -70,18 +70,64 @@ const TestPointView: React.FC = () => {
     }
     setGenerating(true);
     try {
-      await testCaseApi.generate(id, confirmedIds, true);
-      message.success('用例生成成功');
-      await load();
-      navigate(`/requirements/${id}/cases`);
+      const res = await testCaseApi.generate(id, confirmedIds, true);
+      const taskId = res.data?.task_id;
+      if (!taskId) {
+        message.error('未获取到生成任务 ID');
+        return;
+      }
+
+      // 轮询后台任务状态
+      const poll = async (): Promise<boolean> => {
+        const statusRes = await testCaseApi.getGenerateStatus(taskId);
+        const { status, message: taskMsg, error } = statusRes.data || {};
+        if (status === 'completed') {
+          const result = statusRes.data?.result || {};
+          const total = (result.ui_count || 0) + (result.api_count || 0);
+          if (total === 0) {
+            message.warning('任务已完成，但未生成任何用例，请检查后台日志');
+            return false;
+          }
+          message.success(taskMsg || `用例生成完成（共 ${total} 条）`);
+          return true;
+        }
+        if (status === 'failed') {
+          message.error(error || taskMsg || '用例生成失败');
+          return false;
+        }
+        // pending / running 继续轮询
+        return new Promise((resolve) => {
+          setTimeout(() => resolve(poll()), 1500);
+        });
+      };
+
+      const success = await poll();
+      if (success) {
+        await load();
+        navigate(`/requirements/${id}/cases`);
+      }
     } finally {
       setGenerating(false);
     }
   };
 
+  const allIds = points.map(p => p.id);
+  const allSelected = allIds.length > 0 && selectedIds.length === allIds.length;
+  const someSelected = selectedIds.length > 0 && selectedIds.length < allIds.length;
+
+  const handleSelectAll = (checked: boolean) => {
+    setSelectedIds(checked ? allIds : []);
+  };
+
   const columns = [
     {
-      title: '',
+      title: (
+        <Checkbox
+          checked={allSelected}
+          indeterminate={someSelected}
+          onChange={(e) => handleSelectAll(e.target.checked)}
+        />
+      ),
       dataIndex: 'id',
       width: 50,
       render: (tpId: string, record: any) => (

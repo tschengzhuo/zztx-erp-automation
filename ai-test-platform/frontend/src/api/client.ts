@@ -17,13 +17,31 @@ api.interceptors.response.use(
     return response;
   },
   (error) => {
-    const msg = error.response?.data?.message || error.message || '请求失败';
-    message.error(msg);
+    // 401 不弹 message（由登录页/路由守卫处理）
+    if (error.response?.status !== 401) {
+      const msg =
+        error.response?.data?.message ||
+        error.response?.data?.detail ||
+        error.message || '请求失败';
+      message.error(msg);
+    }
     return Promise.reject(error);
   }
 );
 
 export default api;
+
+// ==================== 认证 API ====================
+
+export const authApi = {
+  login: (username: string, password: string) =>
+    api.post('/auth/login', { username, password }),
+
+  register: (username: string, password: string, displayName: string) =>
+    api.post('/auth/register', { username, password, display_name: displayName }),
+
+  me: () => api.get('/auth/me'),
+};
 
 // ==================== 需求 API ====================
 
@@ -39,12 +57,12 @@ export const requirementApi = {
     });
   },
 
-  list: (params?: { module?: string; status?: string; page?: number; page_size?: number }) =>
+  list: (params?: { title?: string; module?: string; category_id?: string; status?: string; sort_by?: string; sort_order?: string; page?: number; page_size?: number }) =>
     api.get('/requirements/', { params }),
 
   get: (id: string) => api.get(`/requirements/${id}`),
 
-  update: (id: string, data: { title?: string; raw_text?: string }) =>
+  update: (id: string, data: { title?: string; module?: string; raw_text?: string }) =>
     api.put(`/requirements/${id}`, data),
 
   parse: (id: string) => api.post(`/requirements/${id}/parse`),
@@ -102,6 +120,23 @@ export const entityApi = {
 
   batchImportSwagger: (module: string, swaggerJson: any) =>
     api.post('/entities/batch-import/swagger', null, { params: { module }, data: swaggerJson }),
+};
+
+// ==================== 分类树 API ====================
+
+export const categoryApi = {
+  getTree: () => api.get('/categories/tree'),
+
+  list: (parent_id?: string) =>
+    api.get('/categories/', { params: { parent_id } }),
+
+  create: (data: { name: string; parent_id?: string; sort_order?: number; description?: string }) =>
+    api.post('/categories/', data),
+
+  update: (id: string, data: { name?: string; parent_id?: string; sort_order?: number; description?: string }) =>
+    api.put(`/categories/${id}`, data),
+
+  delete: (id: string) => api.delete(`/categories/${id}`),
 };
 
 // ==================== 平台统计 ====================

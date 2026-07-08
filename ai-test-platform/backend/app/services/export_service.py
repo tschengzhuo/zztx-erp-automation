@@ -165,52 +165,119 @@ def _style_header(ws, font, fill):
 # ==================== XMind 导出 ====================
 
 async def export_xmind(db: AsyncSession, requirement_id: str) -> str:
-    """导出为 XMind 格式（JSON 兼容格式）"""
+    """导出为 XMind 8+ 格式（基于 test-case-generator skill 规范）
+    3 层结构：TC标题 → 前置条件/操作步骤 → 预期结果
+    """
+    import zipfile
+    import html
+    import datetime as dt
+
     req, test_points, test_cases = await _load_export_data(db, requirement_id)
 
-    # 构建 XMind JSON 结构（兼容 XMind 8+）
-    def _build_topic(title):
-        return {"title": title, "children": {"attached": []}}
+    def _esc(s):
+        return html.escape(str(s) if s else "", quote=False)
 
-    root = _build_topic(req.title)
-    root["children"]["attached"].append(_build_topic(f"模块: {req.module}"))
+    def _make_tc_xml(tc, id_counter):
+        id_counter[0] += 1
+        tc_id = f"t_{id_counter[0]}"
+        title = tc.title or "未命名用例"
+        if not title.startswith("TC:"):
+            title = f"TC: {title}"
+        priority_map = {"P0": "1", "P1": "2", "P2": "3"}
+        p_num = priority_map.get(tc.priority, "2")
+        xml = f'<topic id="{tc_id}">'
+        xml += f'<title>{_esc(title)}</title>'
+        xml += f'<marker-refs><marker-ref marker-id="priority-{p_num}"/></marker-refs>'
+        xml += '<children><topics type="attached">'
 
-    # 按维度分组
-    dim_groups: Dict[str, Any] = {}
-    for tp in test_points:
-        if tp.dimension not in dim_groups:
-            dim_groups[tp.dimension] = _build_topic(tp.dimension)
-        tp_topic = _build_topic(f"[{tp.priority}] {tp.title}")
-        tp_topic["children"]["attached"].append(_build_topic(tp.scenario_desc))
-        dim_groups[tp.dimension]["children"]["attached"].append(tp_topic)
+        # 前置条件
+        if tc.precondition:
+            id_counter[0] += 1
+            xml += f'<topic id="t_{id_counter[0]}"><title>前置：{_esc(tc.precondition)}</title></topic>'
 
-    dim_node = _build_topic("测试点 (按维度)")
-    for dim_topic in dim_groups.values():
-        dim_node["children"]["attached"].append(dim_topic)
-    root["children"]["attached"].append(dim_node)
+        # 操作步骤
+        steps = tc.steps or []
+        for i, step in enumerate(steps):
+            id_counter[0] += 1
+            step_text = ""
+            if isinstance(step, dict):
+                parts = [_safe_str(step.get("action", "")), _safe_str(step.get("target", ""))]
+                val = step.get("value")
+                if val:
+                    parts.append(_safe_str(val))
+                step_text = " → ".join([p for p in parts if p])
+            elif isinstance(step, str):
+                step_text = step
+            xml += f'<topic id="t_{id_counter[0]}"><title>{_esc(step_text)}</title>'
 
-    # 用例节点
+            # 预期结果作为最后一步的子节点
+            if i == len(steps) - 1 and tc.expected_result:
+                xml += '<children><topics type="attached">'
+                id_counter[0] += 1
+                xml += f'<topic id="t_{id_counter[0]}"><title>预期：{_esc(tc.expected_result)}</title></topic>'
+                xml += '</topics></children>'
+
+            xml += '</topic>'
+
+        xml += '</topics></children></topic>'
+        return xml
+
+    id_counter = [0]
+    content = '<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n'
+    content += '<xmap-content xmlns="urn:xmind:xmap:xmlns:content:2.0" xmlns:fo="http://www.w3.org/1999/XSL/Format" xmlns:svg="http://www.w3.org/2000/svg" xmlns:xhtml="http://www.w3.org/1999/xhtml" xmlns:xlink="http://www.w3.org/1999/xlink">'
+    content += '<sheet id="sheet1"><title>测试用例</title>'
+    content += '<topic id="root"><title>测试用例</title><children><topics type="attached">'
+
+    # 按类型分组：UI / API
     ui_cases = [tc for tc in test_cases if tc.case_type == "UI"]
-    case_node = _build_topic(f"用例 ({len(ui_cases)}条)")
-    for tc in ui_cases:
-        tc_topic = _build_topic(f"[{tc.priority}] {tc.case_id}: {tc.title}")
-        for step in (tc.steps or []):
-            step_text = f"{step.get('action','')} → {step.get('target','')}"
-            tc_topic["children"]["attached"].append(_build_topic(step_text))
-        case_node["children"]["attached"].append(tc_topic)
-    root["children"]["attached"].append(case_node)
+    api_cases = [tc for tc in test_cases if tc.case_type == "API"]
 
-    xmind_data = [{
-        "id": "root",
-        "title": "AI Test Platform Export",
-        "rootTopic": root,
-    }]
+    for module_name, cases in [("UI 用例", ui_cases), ("API 用例", api_cases)]:
+        if not cases:
+            continue
+        id_counter[0] += 1
+        content += f'<topic id="t_{id_counter[0]}"><title>{_esc(module_name)}</title><children><topics type="attached">'
+        for tc in cases:
+            content += _make_tc_xml(tc, id_counter)
+        content += '</topics></children></topic>'
 
-    path = _get_export_path(requirement_id, "xmind.json")
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(xmind_data, f, ensure_ascii=False, indent=2)
+    content += '</topics></children></topic></sheet></xmap-content>'
 
-    return path
+    styles = '''<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<xmap-styles xmlns="urn:xmind:xmap:xmlns:style:2.0" xmlns:fo="http://www.w3.org/1999/XSL/Format">
+<styles>
+<style id="priority-1" type="priority"><marker-id>flag-priority-1</marker-id></style>
+<style id="priority-2" type="priority"><marker-id>flag-priority-2</marker-id></style>
+<style id="priority-3" type="priority"><marker-id>flag-priority-3</marker-id></style>
+</styles>
+<markers>
+<marker-group id="priority" display-name="Priority">
+<shapes>
+<shape id="flag-priority-1" display-name="P0" shape="star"/>
+<shape id="flag-priority-2" display-name="P1" shape="circle"/>
+<shape id="flag-priority-3" display-name="P2" shape="triangle"/>
+</shapes>
+</marker-group>
+</markers>
+</xmap-styles>'''
+
+    manifest = '<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n<manifest xmlns="urn:xmind:xmap:xmlns:manifest:1.0">\n<file-entry full-path="content.xml" media-type="text/xml"/>\n<file-entry full-path="styles.xml" media-type="text/xml"/>\n<file-entry full-path="META-INF/" media-type=""/>\n<file-entry full-path="META-INF/manifest.xml" media-type="text/xml"/>\n</manifest>'
+
+    meta = f'<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n<meta xmlns="urn:xmind:xmap:xmlns:meta:2.0" version="2.0">\n<Author><Name>AI Test Platform</Name></Author>\n<CreateDate>{dt.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")}</CreateDate>\n</meta>'
+
+    safe_title = "".join(c for c in (req.title or "test_cases") if c.isalnum() or c in ('_', '-', ' ')).strip()[:50] or "test_cases"
+    filename = f"{safe_title}_测试用例.xmind"
+    filepath = os.path.join(settings.EXPORT_DIR or "storage/exports", filename)
+
+    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+    with zipfile.ZipFile(filepath, 'w', zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr('content.xml', content)
+        zf.writestr('styles.xml', styles)
+        zf.writestr('META-INF/manifest.xml', manifest)
+        zf.writestr('meta.xml', meta)
+
+    logger.info(f"[XMind Export] 导出成功: {filepath} (UI:{len(ui_cases)}, API:{len(api_cases)})")
+    return filepath
 
 
 # ==================== Markdown 导出 ====================
@@ -293,6 +360,17 @@ async def _load_export_data(db: AsyncSession, requirement_id: str):
     test_cases = tc_result.scalars().all()
 
     return req, test_points, test_cases
+
+
+def _safe_str(val) -> str:
+    """安全转换为字符串，支持 list/dict/None"""
+    if val is None:
+        return ""
+    if isinstance(val, str):
+        return val
+    if isinstance(val, (list, dict)):
+        return json.dumps(val, ensure_ascii=False) if isinstance(val, list) else str(val)
+    return str(val)
 
 
 def _get_export_path(requirement_id: str, ext: str) -> str:

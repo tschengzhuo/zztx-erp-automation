@@ -27,7 +27,13 @@ class Settings(BaseSettings):
     HOST: str = "0.0.0.0"
     PORT: int = 8000
 
-    # ========== 数据库 (PostgreSQL) ==========
+    # ========== JWT 认证 ==========
+    JWT_SECRET_KEY: str = "ai-test-platform-jwt-secret-change-me"
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440  # 24 小时
+
+    # ========== 数据库 ==========
+    DB_TYPE: str = "postgresql"  # postgresql | sqlite
     DB_HOST: str = "localhost"
     DB_PORT: int = 5432
     DB_NAME: str = "ai_test_platform"
@@ -37,11 +43,30 @@ class Settings(BaseSettings):
     DB_POOL_OVERFLOW: int = 20
 
     @property
+    def is_sqlite(self) -> bool:
+        return self.DB_TYPE == "sqlite"
+
+    @property
     def DATABASE_URL(self) -> str:
+        if self.is_sqlite:
+            # 支持绝对路径（如 /data/ai_test_platform）和相对路径
+            db_name = self.DB_NAME if self.DB_NAME.endswith(".db") else f"{self.DB_NAME}.db"
+            if Path(db_name).is_absolute():
+                db_path = db_name
+            else:
+                db_path = Path(__file__).parent.parent / db_name
+            return f"sqlite+aiosqlite:///{db_path}"
         return f"postgresql+asyncpg://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
 
     @property
     def DATABASE_URL_SYNC(self) -> str:
+        if self.is_sqlite:
+            db_name = self.DB_NAME if self.DB_NAME.endswith(".db") else f"{self.DB_NAME}.db"
+            if Path(db_name).is_absolute():
+                db_path = db_name
+            else:
+                db_path = Path(__file__).parent.parent / db_name
+            return f"sqlite:///{db_path}"
         return f"postgresql+psycopg2://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
 
     # ========== Qdrant 向量库 ==========
@@ -79,8 +104,8 @@ class Settings(BaseSettings):
     # LLM 通用
     LLM_TEMPERATURE_GENERATE: float = 0.3  # 生成任务低温度保证一致性
     LLM_TEMPERATURE_ANALYZE: float = 0.1   # 分析任务更低温度
-    LLM_MAX_TOKENS_GENERATE: int = 4096
-    LLM_REQUEST_TIMEOUT: int = 120
+    LLM_MAX_TOKENS_GENERATE: int = 8192
+    LLM_REQUEST_TIMEOUT: int = 180
 
     # ========== 向量模型 (本地) ==========
     EMBEDDING_LOCAL_MODEL: str = "BAAI/bge-small-zh-v1.5"  # 备选本地方案
@@ -91,7 +116,7 @@ class Settings(BaseSettings):
     EVIDENCE_DIR: str = str(Path(__file__).parent.parent / "storage" / "evidence")
 
     # ========== 导出 ==========
-    EXPORT_FORMATS: list[str] = ["json", "xlsx", "xmind", "markdown"]
+    EXPORT_FORMATS: list[str] = ["xmind"]
 
     # ========== 需求结构化 Schema ==========
     REQUIREMENT_ENTITY_FIELDS: list[str] = [

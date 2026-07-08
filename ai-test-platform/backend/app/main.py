@@ -4,14 +4,16 @@
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+
+from pathlib import Path
 
 from app.config import settings
 from app.database import init_db, check_db_health
 from app import models  # noqa: F401 导入模型以注册 metadata
-from app.api import requirements, test_points, test_cases, entities
+from app.api import requirements, test_points, test_cases, entities, categories, auth
 
 
 @asynccontextmanager
@@ -21,10 +23,23 @@ async def lifespan(app: FastAPI):
     os.makedirs(settings.EXPORT_DIR, exist_ok=True)
     os.makedirs(settings.EVIDENCE_DIR, exist_ok=True)
 
+    # 确保 SQLite 数据库目录存在
+    if settings.is_sqlite:
+        db_name = settings.DB_NAME if settings.DB_NAME.endswith(".db") else f"{settings.DB_NAME}.db"
+        db_path = Path(db_name) if Path(db_name).is_absolute() else Path(__file__).parent.parent / db_name
+        os.makedirs(db_path.parent, exist_ok=True)
+
     # 尝试初始化数据库
     try:
         await init_db()
         print(f"[OK] Database initialized: {settings.DB_NAME}")
+
+        # 种子数据（首次部署时自动插入演示数据）
+        from app.database import async_session
+        from app.seed import seed_database
+        async with async_session() as session:
+            await seed_database(session)
+            await session.commit()
     except Exception as e:
         print(f"[WARN] Database init skipped (will retry on first request): {e}")
 
@@ -62,13 +77,25 @@ app.include_router(requirements.router)
 app.include_router(test_points.router)
 app.include_router(test_cases.router)
 app.include_router(entities.router)
+app.include_router(categories.router)
+app.include_router(auth.router)
 
 
 # ==================== 基础 API ====================
 
-@app.get("/", response_model=dict)
-async def root():
-    """服务根路径"""
+@app.api_route("/", methods=["GET", "HEAD"])
+async def root(request: Request):
+    """服务根路径：CloudStudio HEAD 健康检查 / 浏览器 GET 返回 SPA"""
+    import os as _os
+    from fastapi.responses import FileResponse as _FileResponse
+    _STATIC_DIR = _os.path.join(_os.path.dirname(_os.path.dirname(__file__)), "static")
+
+    if request.method == "HEAD":
+        return {"name": settings.APP_NAME, "version": settings.APP_VERSION, "status": "ok"}
+
+    if _os.path.isdir(_STATIC_DIR) and _os.path.isfile(_os.path.join(_STATIC_DIR, "index.html")):
+        return _FileResponse(_os.path.join(_STATIC_DIR, "index.html"))
+
     return {
         "name": settings.APP_NAME,
         "version": settings.APP_VERSION,
@@ -120,3 +147,18 @@ async def global_exception_handler(request, exc):
         status_code=500,
         content={"success": False, "message": str(exc), "data": None},
     )
+
+
+# ==================== 静态文件（CloudStudio / 生产环境） ====================
+import os as _os
+from fastapi.responses import FileResponse as _FileResponse
+
+_STATIC_DIR = _os.path.join(_os.path.dirname(_os.path.dirname(__file__)), "static")
+if _os.path.isdir(_STATIC_DIR):
+    # 确保 API 路由优先于静态文件
+    @app.get("/{full_path:path}")
+    async def _serve_spa(full_path: str):
+        file_path = _os.path.join(_STATIC_DIR, full_path)
+        if full_path and _os.path.isfile(file_path):
+            return _FileResponse(file_path)
+        return _FileResponse(_os.path.join(_STATIC_DIR, "index.html"))

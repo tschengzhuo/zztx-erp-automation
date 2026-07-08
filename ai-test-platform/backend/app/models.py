@@ -11,7 +11,26 @@ from sqlalchemy import (
     ForeignKey, UniqueConstraint, Index, JSON, func
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+
+from app.database import Base
+from app.config import settings
+
+# 跨数据库兼容：PostgreSQL 用 JSONB/UUID 原生类型，SQLite 用 JSON/String
+if settings.is_sqlite:
+    # SQLite 模式：UUID 存为 String(36)，JSON 用 core JSON
+    def _uuid_column(**kw):
+        return String(36, **kw)
+    _json_type = JSON
+else:
+    try:
+        from sqlalchemy.dialects.postgresql import UUID as PG_UUID, JSONB
+        def _uuid_column(**kw):
+            return PG_UUID(as_uuid=False, **kw)
+        _json_type = JSONB
+    except ImportError:
+        def _uuid_column(**kw):
+            return String(36, **kw)
+        _json_type = JSON
 
 from app.database import Base
 
@@ -65,9 +84,9 @@ class Requirement(Base):
     """需求实体 - Stage 1 产物"""
     __tablename__ = "requirements"
 
-    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
+    id: Mapped[str] = mapped_column(_uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
     version: Mapped[int] = mapped_column(Integer, default=1)
-    parent_version_id: Mapped[Optional[str]] = mapped_column(UUID(as_uuid=False), ForeignKey("requirements.id"), nullable=True)
+    parent_version_id: Mapped[Optional[str]] = mapped_column(_uuid_column(), ForeignKey("requirements.id"), nullable=True)
 
     # 核心字段
     title: Mapped[str] = mapped_column(String(500), nullable=False, index=True)
@@ -76,23 +95,23 @@ class Requirement(Base):
 
     # 结构化实体 (Stage 1 LLM 解析)
     description: Mapped[Optional[str]] = mapped_column(Text)
-    functional_points: Mapped[Optional[dict]] = mapped_column(JSONB, default=list)
-    participants: Mapped[Optional[dict]] = mapped_column(JSONB, default=list)
-    trigger_conditions: Mapped[Optional[dict]] = mapped_column(JSONB, default=list)
-    expected_outcomes: Mapped[Optional[dict]] = mapped_column(JSONB, default=list)
-    constraints: Mapped[Optional[dict]] = mapped_column(JSONB, default=list)
-    data_scope: Mapped[Optional[dict]] = mapped_column(JSONB, default=list)
+    functional_points: Mapped[Optional[dict]] = mapped_column(_json_type, default=list)
+    participants: Mapped[Optional[dict]] = mapped_column(_json_type, default=list)
+    trigger_conditions: Mapped[Optional[dict]] = mapped_column(_json_type, default=list)
+    expected_outcomes: Mapped[Optional[dict]] = mapped_column(_json_type, default=list)
+    constraints: Mapped[Optional[dict]] = mapped_column(_json_type, default=list)
+    data_scope: Mapped[Optional[dict]] = mapped_column(_json_type, default=list)
 
     # 需求指纹 (横切机制A)
     feature_id: Mapped[Optional[str]] = mapped_column(String(300), index=True)
-    extracted_entities: Mapped[Optional[dict]] = mapped_column(JSONB)  # {pages, apis, roles, business_terms}
+    extracted_entities: Mapped[Optional[dict]] = mapped_column(_json_type)  # {pages, apis, roles, business_terms}
     summary_text: Mapped[Optional[str]] = mapped_column(Text)  # 结构化摘要，供向量化
 
     # 向量 embedding
-    embedding: Mapped[Optional[list]] = mapped_column(JSONB)  # 摘要的向量表示
+    embedding: Mapped[Optional[list]] = mapped_column(_json_type)  # 摘要的向量表示
 
     # 显式关联 (L1)
-    related_req_ids: Mapped[Optional[list]] = mapped_column(JSONB, default=list)
+    related_req_ids: Mapped[Optional[list]] = mapped_column(_json_type, default=list)
 
     # 原始文本
     raw_text: Mapped[Optional[str]] = mapped_column(Text)
@@ -125,10 +144,10 @@ class RequirementVersion(Base):
     """需求版本快照 - 支持迭代回滚"""
     __tablename__ = "requirement_versions"
 
-    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
-    requirement_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("requirements.id"), nullable=False, index=True)
+    id: Mapped[str] = mapped_column(_uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
+    requirement_id: Mapped[str] = mapped_column(_uuid_column(), ForeignKey("requirements.id"), nullable=False, index=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False)
-    snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False)  # 完整快照
+    snapshot: Mapped[dict] = mapped_column(_json_type, nullable=False)  # 完整快照
     change_summary: Mapped[Optional[str]] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
 
@@ -143,8 +162,8 @@ class TestPoint(Base):
     """测试点 - Stage 2 产物"""
     __tablename__ = "test_points"
 
-    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
-    requirement_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("requirements.id"), nullable=False, index=True)
+    id: Mapped[str] = mapped_column(_uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
+    requirement_id: Mapped[str] = mapped_column(_uuid_column(), ForeignKey("requirements.id"), nullable=False, index=True)
 
     # 核心字段
     title: Mapped[str] = mapped_column(String(500), nullable=False)
@@ -181,22 +200,22 @@ class TestCase(Base):
     """结构化用例 - Stage 3 产物"""
     __tablename__ = "test_cases"
 
-    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
+    id: Mapped[str] = mapped_column(_uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
     case_id: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)  # TC-2026-XXXX
-    requirement_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("requirements.id"), nullable=False, index=True)
-    test_point_id: Mapped[Optional[str]] = mapped_column(UUID(as_uuid=False), ForeignKey("test_points.id"), index=True)
+    requirement_id: Mapped[str] = mapped_column(_uuid_column(), ForeignKey("requirements.id"), nullable=False, index=True)
+    test_point_id: Mapped[Optional[str]] = mapped_column(_uuid_column(), ForeignKey("test_points.id"), index=True)
 
     # 核心字段
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     precondition: Mapped[Optional[str]] = mapped_column(Text)
-    steps: Mapped[List[dict]] = mapped_column(JSONB, nullable=False, default=list)
+    steps: Mapped[List[dict]] = mapped_column(_json_type, nullable=False, default=list)
     expected_result: Mapped[Optional[str]] = mapped_column(Text)
-    test_data: Mapped[Optional[dict]] = mapped_column(JSONB)
+    test_data: Mapped[Optional[dict]] = mapped_column(_json_type)
 
     # 元信息
     case_type: Mapped[str] = mapped_column(String(10), default=CaseType.UI)
     priority: Mapped[str] = mapped_column(String(10), default=Priority.P1)
-    tags: Mapped[Optional[list]] = mapped_column(JSONB, default=list)
+    tags: Mapped[Optional[list]] = mapped_column(_json_type, default=list)
 
     # 步骤级标记 (供迭代同步 Merge 使用)
     # steps 数组中每个步骤带: {"locked": false, "last_modified_by": "AI"}
@@ -224,7 +243,6 @@ class TestCase(Base):
     __table_args__ = (
         Index("idx_tc_req_type", "requirement_id", "case_type"),
         Index("idx_tc_priority", "priority"),
-        Index("idx_tc_tags", "tags", postgresql_using="gin"),
     )
 
     def __repr__(self):
@@ -235,10 +253,10 @@ class CaseVersion(Base):
     """用例版本 - 支持回归资产版本化"""
     __tablename__ = "case_versions"
 
-    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
-    test_case_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("test_cases.id"), nullable=False, index=True)
+    id: Mapped[str] = mapped_column(_uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
+    test_case_id: Mapped[str] = mapped_column(_uuid_column(), ForeignKey("test_cases.id"), nullable=False, index=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False)
-    steps: Mapped[List[dict]] = mapped_column(JSONB, nullable=False)
+    steps: Mapped[List[dict]] = mapped_column(_json_type, nullable=False)
     expected_result: Mapped[Optional[str]] = mapped_column(Text)
     change_reason: Mapped[Optional[str]] = mapped_column(Text)  # 需求变更/自愈/人工修改
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
@@ -252,15 +270,15 @@ class ExecutionResult(Base):
     """用例执行记录 - Stage 4/5 产物"""
     __tablename__ = "execution_results"
 
-    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
-    test_case_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("test_cases.id"), nullable=False, index=True)
+    id: Mapped[str] = mapped_column(_uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
+    test_case_id: Mapped[str] = mapped_column(_uuid_column(), ForeignKey("test_cases.id"), nullable=False, index=True)
 
     status: Mapped[str] = mapped_column(String(20), nullable=False)  # passed | failed | error | skipped
     duration_ms: Mapped[Optional[int]] = mapped_column(Integer)
     error_type: Mapped[Optional[str]] = mapped_column(String(50))  # product_bug | case_bug | env_issue | data_issue | flaky
     error_message: Mapped[Optional[str]] = mapped_column(Text)
     analysis: Mapped[Optional[str]] = mapped_column(Text)  # LLM 分析结果
-    evidence: Mapped[Optional[dict]] = mapped_column(JSONB)  # 截图/DOM/HAR 路径
+    evidence: Mapped[Optional[dict]] = mapped_column(_json_type)  # 截图/DOM/HAR 路径
     executed_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
 
     __table_args__ = (
@@ -274,7 +292,7 @@ class TraceabilityLink(Base):
     """追溯链：需求→功能点→测试点→用例→步骤的有向图"""
     __tablename__ = "traceability_links"
 
-    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
+    id: Mapped[str] = mapped_column(_uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
 
     source_type: Mapped[str] = mapped_column(String(30), nullable=False)  # requirement | feature_point | test_point | test_case
     source_id: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -299,14 +317,14 @@ class EntityRegistry(Base):
     """全局实体注册表：页面、接口、角色、业务术语"""
     __tablename__ = "entity_registry"
 
-    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
+    id: Mapped[str] = mapped_column(_uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
     entity_type: Mapped[str] = mapped_column(String(20), nullable=False, index=True)  # page | api | role | business_term
     module: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     unified_id: Mapped[str] = mapped_column(String(300), unique=True, nullable=False)  # 统一ID
-    aliases: Mapped[Optional[list]] = mapped_column(JSONB, default=list)  # 别名列表
+    aliases: Mapped[Optional[list]] = mapped_column(_json_type, default=list)  # 别名列表
     description: Mapped[Optional[str]] = mapped_column(Text)
-    metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB)  # API: {method, path, params}
+    metadata_: Mapped[Optional[dict]] = mapped_column("metadata", _json_type)  # API: {method, path, params}
 
     is_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)  # QA 确认
     created_by: Mapped[str] = mapped_column(String(50), default="AI")
@@ -326,9 +344,9 @@ class SyncRecord(Base):
     """需求迭代同步记录"""
     __tablename__ = "sync_records"
 
-    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
+    id: Mapped[str] = mapped_column(_uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
 
-    requirement_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("requirements.id"), nullable=False, index=True)
+    requirement_id: Mapped[str] = mapped_column(_uuid_column(), ForeignKey("requirements.id"), nullable=False, index=True)
     old_version: Mapped[int] = mapped_column(Integer, nullable=False)
     new_version: Mapped[int] = mapped_column(Integer, nullable=False)
 
@@ -336,8 +354,61 @@ class SyncRecord(Base):
     affected_feature_id: Mapped[Optional[str]] = mapped_column(String(300))
     affected_case_count: Mapped[int] = mapped_column(Integer, default=0)
 
-    diff_summary: Mapped[Optional[dict]] = mapped_column(JSONB)
+    diff_summary: Mapped[Optional[dict]] = mapped_column(_json_type)
     action: Mapped[str] = mapped_column(String(30), default="pending")  # pending | synced | reviewed | conflicted
 
     confirmed_by: Mapped[Optional[str]] = mapped_column(String(100))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+
+
+# ==================== 模块分类树 ====================
+
+class ModuleCategory(Base):
+    """模块分类树 - 支持多层级分类管理需求"""
+    __tablename__ = "module_categories"
+
+    id: Mapped[str] = mapped_column(_uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
+    name: Mapped[str] = mapped_column(String(200), nullable=False, comment="分类名称")
+    parent_id: Mapped[Optional[str]] = mapped_column(
+        _uuid_column(), ForeignKey("module_categories.id", ondelete="CASCADE"),
+        nullable=True, index=True, comment="父分类ID"
+    )
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, comment="排序序号")
+    description: Mapped[Optional[str]] = mapped_column(Text, comment="分类描述")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
+
+    # 自引用关系
+    parent: Mapped[Optional["ModuleCategory"]] = relationship(
+        "ModuleCategory", remote_side=[id], back_populates="children"
+    )
+    children: Mapped[List["ModuleCategory"]] = relationship(
+        "ModuleCategory", back_populates="parent", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        Index("idx_mc_parent_id", "parent_id"),
+        Index("idx_mc_active", "is_active"),
+    )
+
+    def __repr__(self):
+        return f"<ModuleCategory {self.name}>"
+
+
+# ==================== 用户认证 ====================
+
+class User(Base):
+    """平台用户"""
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(_uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
+    username: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
+    display_name: Mapped[str] = mapped_column(String(200), nullable=False, default="")
+    password_hash: Mapped[str] = mapped_column(String(256), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
+
+    def __repr__(self):
+        return f"<User {self.username}>"

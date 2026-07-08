@@ -127,7 +127,7 @@ const Dashboard: React.FC = () => {
             <Card size="small" style={{ background: '#EEEDFE', borderColor: '#CECBF6' }}>
               <Typography.Title level={5} style={{ color: '#534AB7' }}>Stage 3: 用例转换</Typography.Title>
               <Typography.Paragraph type="secondary" style={{ fontSize: 13 }}>
-                UI+API双形态 → 步骤级标记 → 支持Excel/XMind导出
+                UI+API双形态 → 步骤级标记 → 支持XMind导出
               </Typography.Paragraph>
             </Card>
           </Col>

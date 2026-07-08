@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 class RequirementCreate(BaseModel):
     """上传需求"""
     title: str = Field(..., max_length=500, description="需求标题")
-    module: str = Field(..., max_length=200, description="所属模块")
+    module: Optional[str] = Field(default="", max_length=200, description="所属模块（空则由系统自动分类）")
     raw_text: str = Field(..., description="需求文档原文")
     source: str = Field(default="manual", description="来源: manual|jira|feishu|confluence")
 
@@ -19,7 +19,9 @@ class RequirementCreate(BaseModel):
 class RequirementUpdate(BaseModel):
     """更新需求（迭代）"""
     title: Optional[str] = None
+    module: Optional[str] = None
     raw_text: Optional[str] = None
+
 
 
 class FunctionalPoint(BaseModel):
@@ -53,6 +55,7 @@ class RequirementResponse(BaseModel):
     version: int
     title: str
     module: str
+    raw_text: Optional[str] = None
     source: str
     status: str
     feature_id: Optional[str] = None
@@ -69,6 +72,7 @@ class RequirementResponse(BaseModel):
     updated_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
+
 
 
 # ==================== 测试点 ====================
@@ -127,7 +131,7 @@ class CaseStep(BaseModel):
 class TestCaseCreate(BaseModel):
     """生成用例请求"""
     requirement_id: str
-    test_point_ids: List[str] = Field(..., description="关联的测试点 ID")
+    test_point_ids: List[str] = Field(default_factory=list, description="关联的测试点 ID（空则用全部确认的测试点）")
     generate_both: bool = Field(default=True, description="是否同时生成 UI 和 API 用例")
 
 
@@ -261,3 +265,73 @@ class ExportRequest(BaseModel):
     requirement_id: str
     format: str = Field(default="xlsx", description="json|xlsx|xmind|markdown")
     include_summary: bool = Field(default=True)
+
+
+# ==================== 模块分类树 ====================
+
+class CategoryCreate(BaseModel):
+    """创建分类"""
+    name: str = Field(..., max_length=200, description="分类名称")
+    parent_id: Optional[str] = Field(None, description="父分类ID（空为根节点）")
+    sort_order: int = Field(default=0, description="排序序号")
+    description: Optional[str] = Field(None, description="分类描述")
+
+
+class CategoryUpdate(BaseModel):
+    """更新分类"""
+    name: Optional[str] = Field(None, max_length=200)
+    parent_id: Optional[str] = None
+    sort_order: Optional[int] = None
+    description: Optional[str] = None
+
+
+class CategoryResponse(BaseModel):
+    """分类响应（含子树）"""
+    id: str
+    name: str
+    parent_id: Optional[str] = None
+    sort_order: int = 0
+    description: Optional[str] = None
+    children: List["CategoryResponse"] = Field(default_factory=list)
+    created_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class CategoryTreeResponse(BaseModel):
+    """分类树响应"""
+    success: bool = True
+    data: List[CategoryResponse] = Field(default_factory=list)
+
+
+# ==================== 用户认证 ====================
+
+class UserRegister(BaseModel):
+    """用户注册"""
+    username: str = Field(..., min_length=3, max_length=100, description="用户名")
+    password: str = Field(..., min_length=6, max_length=100, description="密码")
+    display_name: str = Field(default="", max_length=200, description="显示名称")
+
+
+class UserLogin(BaseModel):
+    """用户登录"""
+    username: str = Field(..., min_length=3, max_length=100, description="用户名")
+    password: str = Field(..., min_length=6, max_length=100, description="密码")
+
+
+class TokenResponse(BaseModel):
+    """Token 响应"""
+    access_token: str
+    token_type: str = "bearer"
+    user: dict
+
+
+class UserResponse(BaseModel):
+    """用户信息"""
+    id: str
+    username: str
+    display_name: str
+    is_active: bool
+    created_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}

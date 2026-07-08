@@ -2,6 +2,8 @@
 # 用例管理 + Stage 3 + 导出
 
 import asyncio
+import logging
+import os
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
@@ -16,14 +18,13 @@ from app.schemas import (
     APIResponse, ExportRequest,
 )
 from app.services.stage3_cases import generate_test_cases
-from app.services.export_service import (
-    export_json, export_xlsx, export_xmind, export_markdown,
-)
+from app.services.export_service import export_xmind
 from app.services.task_manager import (
     create_task, get_task, run_stage3_in_background,
 )
 
 router = APIRouter(prefix="/api/test-cases", tags=["用例管理"])
+logger = logging.getLogger(__name__)
 
 
 @router.post("/generate", response_model=APIResponse)
@@ -216,10 +217,7 @@ async def export_cases(
 ):
     """导出用例到指定格式"""
     format_handlers = {
-        "json": export_json,
-        "xlsx": export_xlsx,
         "xmind": export_xmind,
-        "markdown": export_markdown,
     }
 
     handler = format_handlers.get(export_req.format)
@@ -229,10 +227,16 @@ async def export_cases(
 
     try:
         path = await handler(db, export_req.requirement_id)
-        return FileResponse(path, filename=path.split("/")[-1] if "/" in path else path.split("\\")[-1],
-                            media_type="application/octet-stream")
+        return FileResponse(
+            path,
+            filename=os.path.basename(path),
+            media_type="application/octet-stream",
+        )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"导出失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"导出失败: {str(e)}")
 
 
 async def _get_next_version(db: AsyncSession, case_id: str) -> int:

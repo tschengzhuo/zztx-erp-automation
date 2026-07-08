@@ -9,12 +9,21 @@ from app.config import settings
 
 
 # 异步引擎
+_engine_kwargs = dict(
+    echo=settings.DEBUG,
+    pool_pre_ping=True,
+)
+if not settings.is_sqlite:
+    _engine_kwargs.update(
+        pool_size=settings.DB_POOL_SIZE,
+        max_overflow=settings.DB_POOL_OVERFLOW,
+    )
+else:
+    _engine_kwargs["connect_args"] = {"check_same_thread": False}
+
 engine = create_async_engine(
     settings.DATABASE_URL,
-    echo=settings.DEBUG,
-    pool_size=settings.DB_POOL_SIZE,
-    max_overflow=settings.DB_POOL_OVERFLOW,
-    pool_pre_ping=True,
+    **_engine_kwargs,
 )
 
 # 异步 Session 工厂
@@ -45,14 +54,15 @@ async def get_db() -> AsyncSession:
 
 async def init_db():
     """初始化数据库表"""
-    # 可选扩展：单独事务尝试安装，失败不影响核心建表
-    for ext in ["vector", "pgcrypto"]:
-        try:
-            async with engine.begin() as conn:
-                await conn.execute(text(f"CREATE EXTENSION IF NOT EXISTS {ext}"))
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).warning(f"Extension {ext} not created (skip): {e}")
+    if not settings.is_sqlite:
+        # 仅 PostgreSQL 扩展
+        for ext in ["vector", "pgcrypto"]:
+            try:
+                async with engine.begin() as conn:
+                    await conn.execute(text(f"CREATE EXTENSION IF NOT EXISTS {ext}"))
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Extension {ext} not created (skip): {e}")
 
     # 创建表结构
     async with engine.begin() as conn:

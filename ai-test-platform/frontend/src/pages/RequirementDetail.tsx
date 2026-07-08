@@ -81,8 +81,17 @@ const RequirementDetail: React.FC = () => {
           setCaseProgress(0);
           message.error(statusMsg || '用例生成失败，请查看后端日志');
         }
-      } catch (e) {
-        // 轮询中网络抖动不提示，继续等待下次轮询
+      } catch (e: any) {
+        // 404/任务不存在时停止轮询
+        if (e?.response?.status === 404) {
+          clearInterval(pollingRef.current!);
+          pollingRef.current = null;
+          setGeneratingCases(false);
+          setCaseProgress(0);
+          message.error('任务已过期，请重新触发生成');
+          return;
+        }
+        // 其他网络错误继续等待下次轮询
       }
     }, 2000);
   }, [load]);

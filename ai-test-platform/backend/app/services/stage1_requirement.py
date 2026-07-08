@@ -122,9 +122,18 @@ async def parse_requirement(
             logger.warning(f"[Stage 1] embedding 生成失败 (非致命): {e}")
 
     # 5. 写入追溯链: Requirement → FeaturePoints
+    # 先查询已存在的 feature_point 关联，避免 autoflush 导致重复插入
+    existing_links_stmt = select(TraceabilityLink.target_id).where(
+        TraceabilityLink.source_type == "requirement",
+        TraceabilityLink.source_id == requirement_id,
+        TraceabilityLink.target_type == "feature_point",
+    )
+    existing_result = await db.execute(existing_links_stmt)
+    existing_target_ids = {row[0] for row in existing_result.all()}
+
     for fp in (req.functional_points or []):
         fid = fp.get("feature_id", "")
-        if fid:
+        if fid and fid not in existing_target_ids:
             link = TraceabilityLink(
                 source_type="requirement", source_id=requirement_id,
                 target_type="feature_point", target_id=fid,
@@ -132,6 +141,7 @@ async def parse_requirement(
                 created_by="AI",
             )
             db.add(link)
+
 
     # 6. 提取实体并注册
     entities = req.extracted_entities or {}

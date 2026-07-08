@@ -176,11 +176,7 @@ const CaseView: React.FC = () => {
       {/* 操作栏 */}
       <Card size="small" style={{ marginBottom: 16 }}>
         <Space size="middle">
-          <Typography.Text strong>导出格式：</Typography.Text>
-          <Button icon={<DownloadOutlined />} onClick={() => handleExport('xlsx')}>Excel</Button>
-          <Button icon={<DownloadOutlined />} onClick={() => handleExport('json')}>JSON</Button>
-          <Button icon={<DownloadOutlined />} onClick={() => handleExport('xmind')}>XMind</Button>
-          <Button icon={<DownloadOutlined />} onClick={() => handleExport('markdown')}>Markdown</Button>
+          <Button icon={<DownloadOutlined />} onClick={() => handleExport('xmind')}>导出 XMind</Button>
         </Space>
       </Card>
 
