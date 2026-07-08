@@ -174,14 +174,16 @@ class AnthropicProvider(LLMProvider):
 
 
 class QwenProvider(LLMProvider):
-    """通义千问 Provider"""
+    """通义千问 Provider - 使用 OpenAI 兼容模式"""
 
     provider_name = "qwen"
 
     def __init__(self):
-        import dashscope
-        self.api_key = settings.QWEN_API_KEY
-        dashscope.api_key = self.api_key
+        self.client = AsyncOpenAI(
+            api_key=settings.QWEN_API_KEY,
+            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            timeout=settings.LLM_REQUEST_TIMEOUT,
+        )
 
     async def chat(
         self,
@@ -190,23 +192,13 @@ class QwenProvider(LLMProvider):
         max_tokens: int = 4096,
         response_format: Optional[dict] = None,
     ) -> str:
-        from dashscope.aio import Generation
-        # 转换消息格式
-        qwen_messages = []
-        for m in messages:
-            qwen_messages.append({"role": m["role"], "content": m["content"]})
-
-        response = await Generation.call(
+        response = await self.client.chat.completions.create(
             model=settings.QWEN_MODEL_STRONG,
-            messages=qwen_messages,
+            messages=messages,
             temperature=temperature,
             max_tokens=max_tokens,
-            result_format="text",
         )
-        if response.status_code == 200:
-            return response.output.text
-        else:
-            raise Exception(f"Qwen API error: {response.message}")
+        return response.choices[0].message.content or ""
 
     async def chat_structured(
         self,
@@ -215,22 +207,45 @@ class QwenProvider(LLMProvider):
         temperature: float = 0.3,
         max_tokens: int = 4096,
     ) -> dict:
-        # 通过 prompt 约束 JSON
-        if schema:
-            schema_text = json.dumps(schema, ensure_ascii=False, indent=2)
-            constraint = f"\n\n请严格按照以下 JSON Schema 输出，只输出 JSON：\n```json\n{schema_text}\n```"
-            for m in reversed(messages):
-                if m["role"] == "user":
-                    m["content"] += constraint
-                    break
+        # 千问兼容模式需要 prompt 中包含 "json" 字样才能用 json_object
+        # 在最后一次 user 消息末尾追加约束
+        json_hint = "\n\n请严格按照以下JSON Schema输出，只输出有效JSON对象：\n" + json.dumps(schema or {}, ensure_ascii=False)
+        for m in reversed(messages):
+            if m["role"] == "user":
+                m["content"] += json_hint
+                break
 
-        text = await self.chat(messages, temperature, max_tokens)
-        text = text.strip()
-        if "```json" in text:
-            text = text.split("```json")[1].split("```")[0].strip()
-        elif "```" in text:
-            text = text.split("```")[1].split("```")[0].strip()
-        return json.loads(text)
+        kwargs: dict[str, Any] = {
+            "model": settings.QWEN_MODEL_STRONG,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "response_format": {"type": "json_object"},
+        }
+
+        response = await self.client.chat.completions.create(**kwargs)
+        content = response.choices[0].message.content or "{}"
+
+        # 提取 JSON（兼容 markdown 包裹的情况）
+        content = content.strip()
+        if "```json" in content:
+            content = content.split("```json")[1].split("```")[0].strip()
+        elif "```" in content:
+            content = content.split("```")[1].split("```")[0].strip()
+
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError as e:
+            logger.error(f"[Qwen] JSON 解析失败: {e}, content[:300]={content[:300]}")
+            # 尝试提取最外层 {...}
+            brace_start = content.find("{")
+            brace_end = content.rfind("}")
+            if brace_start != -1 and brace_end > brace_start:
+                try:
+                    return json.loads(content[brace_start:brace_end + 1])
+                except json.JSONDecodeError:
+                    pass
+            raise Exception(f"Qwen 结构化输出解析失败: {content[:200]}")
 
 
 # ==================== Provider 工厂 ====================

@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 
 from app.config import settings
 from app.database import init_db, check_db_health
+from app import models  # noqa: F401 导入模型以注册 metadata
 from app.api import requirements, test_points, test_cases, entities
 
 

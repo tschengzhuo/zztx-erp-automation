@@ -3,7 +3,7 @@ import { message } from 'antd';
 
 const api = axios.create({
   baseURL: '/api',
-  timeout: 120000, // 2 分钟（LLM 调用较慢）
+  timeout: 300000, // 5 分钟（Stage 3 生成用例可能较慢）
 });
 
 // 响应拦截
@@ -72,6 +72,9 @@ export const testPointApi = {
 export const testCaseApi = {
   generate: (requirement_id: string, test_point_ids: string[], generate_both: boolean = true) =>
     api.post('/test-cases/generate', { requirement_id, test_point_ids, generate_both }),
+
+  getGenerateStatus: (taskId: string) =>
+    api.get(`/test-cases/generate-status/${taskId}`),
 
   listByRequirement: (requirement_id: string, case_type?: string) =>
     api.get(`/test-cases/by-requirement/${requirement_id}`, { params: { case_type } }),

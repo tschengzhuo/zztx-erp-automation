@@ -45,10 +45,20 @@ async def get_db() -> AsyncSession:
 
 async def init_db():
     """初始化数据库表"""
+    # 可选扩展：单独事务尝试安装，失败不影响核心建表
+    for ext in ["vector", "pgcrypto"]:
+        try:
+            async with engine.begin() as conn:
+                await conn.execute(text(f"CREATE EXTENSION IF NOT EXISTS {ext}"))
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Extension {ext} not created (skip): {e}")
+
+    # 创建表结构
     async with engine.begin() as conn:
-        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
         await conn.run_sync(Base.metadata.create_all)
+
+
 
 
 async def check_db_health() -> bool:

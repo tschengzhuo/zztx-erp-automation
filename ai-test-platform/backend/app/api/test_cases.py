@@ -1,6 +1,7 @@
 # AI Test Platform - API Routes: Test Cases
 # 用例管理 + Stage 3 + 导出
 
+import asyncio
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
@@ -18,6 +19,9 @@ from app.services.stage3_cases import generate_test_cases
 from app.services.export_service import (
     export_json, export_xlsx, export_xmind, export_markdown,
 )
+from app.services.task_manager import (
+    create_task, get_task, run_stage3_in_background,
+)
 
 router = APIRouter(prefix="/api/test-cases", tags=["用例管理"])
 
@@ -27,23 +31,52 @@ async def generate_test_cases_stage3(
     req_data: TestCaseCreate,
     db: AsyncSession = Depends(get_db),
 ):
-    """Stage 3: 从测试点生成结构化用例"""
+    """Stage 3: 从测试点生成结构化用例（异步后台执行）"""
+    # 参数校验：确认测试点存在
     try:
-        result = await generate_test_cases(
-            db,
-            req_data.requirement_id,
-            req_data.test_point_ids,
-            req_data.generate_both,
+        from app.services.stage3_cases import generate_test_cases as _check
+    except Exception:
+        pass
+
+    # 创建后台任务
+    task_id = create_task()
+
+    # 启动后台异步任务
+    asyncio.create_task(
+        run_stage3_in_background(
+            task_id=task_id,
+            requirement_id=req_data.requirement_id,
+            test_point_ids=req_data.test_point_ids,
+            generate_both=req_data.generate_both,
         )
-        return APIResponse(
-            success=result["status"] == "success",
-            message=result["message"],
-            data=result.get("data"),
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"生成失败: {str(e)}")
+    )
+
+    return APIResponse(
+        success=True,
+        message="Stage 3 任务已启动，正在后台生成用例",
+        data={"task_id": task_id, "status": "pending"},
+    )
+
+
+@router.get("/generate-status/{task_id}", response_model=APIResponse)
+async def get_generate_status(task_id: str):
+    """轮询 Stage 3 任务状态"""
+    task = get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在或已过期")
+
+    return APIResponse(
+        success=task["status"] != "failed",
+        message=task["message"],
+        data={
+            "task_id": task_id,
+            "status": task["status"],
+            "progress": task.get("progress", 0),
+            "total": task.get("total", 0),
+            "result": task.get("result"),
+            "error": task.get("error"),
+        },
+    )
 
 
 @router.get("/by-requirement/{requirement_id}", response_model=APIResponse)

@@ -64,6 +64,7 @@ async def generate_test_cases(
     test_point_ids: Optional[List[str]] = None,
     generate_both: bool = True,
     provider: Optional[LLMProvider] = None,
+    progress_callback=None,
 ) -> dict:
     """执行 Stage 3：从测试点生成结构化用例
 
@@ -101,16 +102,43 @@ async def generate_test_cases(
 
     logger.info(f"[Stage 3] 开始生成用例: {req.title}, 测试点数={len(test_points)}")
 
-    # 2. 批量生成（每批最多 5 个测试点，控制 token）
+    # 2.5 清理旧用例（支持重新生成）
+    from sqlalchemy import delete
+    old_cases_stmt = select(TestCase).where(TestCase.requirement_id == requirement_id)
+    old_result = await db.execute(old_cases_stmt)
+    old_cases = old_result.scalars().all()
+    if old_cases:
+        old_case_ids = [c.id for c in old_cases]
+        await db.execute(
+            delete(CaseVersion).where(CaseVersion.test_case_id.in_(old_case_ids))
+        )
+        await db.execute(
+            delete(TraceabilityLink).where(
+                TraceabilityLink.target_type == "test_case",
+                TraceabilityLink.target_id.in_(old_case_ids),
+            )
+        )
+        await db.execute(
+            delete(TestCase).where(TestCase.requirement_id == requirement_id)
+        )
+        await db.flush()
+        logger.info(f"[Stage 3] 清理了 {len(old_cases)} 条旧用例")
+
+    # 3. 批量生成（每批最多 5 个测试点，控制 token）
     batch_size = 5
     all_ui_cases = []
     all_api_cases = []
     case_counter = 0
+    total_batches = max(1, (len(test_points) + batch_size - 1) // batch_size)
 
     for i in range(0, len(test_points), batch_size):
         batch = test_points[i:i + batch_size]
+        batch_index = i // batch_size
         tp_text = _format_test_points(batch)
         req_text = _format_requirement(req)
+
+        if progress_callback:
+            progress_callback(batch_index + 1, total_batches, f"正在生成第 {batch_index + 1}/{total_batches} 批用例...")
 
         try:
             cases_data = await llm.chat_structured(
