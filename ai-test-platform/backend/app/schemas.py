@@ -308,14 +308,14 @@ class CategoryTreeResponse(BaseModel):
 
 class UserRegister(BaseModel):
     """用户注册"""
-    username: str = Field(..., min_length=3, max_length=100, description="用户名")
+    username: str = Field(..., max_length=100, description="用户名")
     password: str = Field(..., min_length=6, max_length=100, description="密码")
     display_name: str = Field(default="", max_length=200, description="显示名称")
 
 
 class UserLogin(BaseModel):
     """用户登录"""
-    username: str = Field(..., min_length=3, max_length=100, description="用户名")
+    username: str = Field(..., max_length=100, description="用户名")
     password: str = Field(..., min_length=6, max_length=100, description="密码")
 
 

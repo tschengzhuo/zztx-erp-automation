@@ -69,6 +69,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = useCallback(async (username: string, password: string) => {
     const res = await api.post('/auth/login', { username, password });
+    // 拦截器已解包 {success,data} → data，所以 res.data 直接就是 {access_token, user}
     const d = res.data;
     saveAuth(d.access_token, d.user);
   }, [saveAuth]);
@@ -79,6 +80,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       password,
       display_name: displayName,
     });
+    // 拦截器已解包 {success,data} → data，所以 res.data 直接就是 {access_token, user}
     const d = res.data;
     saveAuth(d.access_token, d.user);
   }, [saveAuth]);

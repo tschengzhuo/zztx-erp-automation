@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Environment (contains API keys)
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+server_err.log
+server_test.log
+vite_stderr.log
+vite_stdout.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Storage
+storage/
+exports/
+
+# Temp files
+task_id.txt
